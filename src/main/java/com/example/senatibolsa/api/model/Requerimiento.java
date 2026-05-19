@@ -19,8 +19,5 @@ public class Requerimiento {
     @JoinColumn(name = "id_oferta", nullable = false)
     @JsonProperty(access = JsonProperty.Access.WRITE_ONLY)
     private OfertaLaboral ofertaLaboral;
-    public Requerimiento() {
-    }
-
-
+    
 }
