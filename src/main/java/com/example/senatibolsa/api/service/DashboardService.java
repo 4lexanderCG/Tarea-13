@@ -12,6 +12,8 @@ import java.time.DayOfWeek;
 import java.time.LocalDate;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Map;
+import java.util.stream.Collectors;
 
 @Service
 public class DashboardService {
@@ -31,12 +33,12 @@ public class DashboardService {
         // LÓGICA DE RESUMEN CARD
         ResumenCardDTO resumen = new ResumenCardDTO();
         resumen.setTotalAprendices((int) practicanteRepo.countByActivoTrue());
-        
+
         long totalTareas = tareaRepo.countByActivoTrue();
-        long tareasTerminadas = tareaRepo.countByEstadoTarea_IdEstadoTareaAndActivoTrue(1); 
+        long tareasTerminadas = tareaRepo.countByEstadoTarea_IdEstadoTareaAndActivoTrue(1);
         int promedio = (totalTareas == 0) ? 0 : (int) Math.round((tareasTerminadas * 100.0) / totalTareas);
         resumen.setPromedioGeneral(promedio);
-        
+
         resumen.setEnRiesgo((int) practicanteRepo.countByActivoTrueAndPrioridad_IdPrioridad(1));
         response.setResumenCard(resumen);
 
@@ -51,40 +53,51 @@ public class DashboardService {
         response.setAvance(avance);
 
         // LÓGICA DE LISTA DE APRENDICES
-        List<Practicante> practicantes = practicanteRepo.findAll();
+        List<Practicante> practicantesActivos = practicanteRepo.findByActivoTrue();
+
+        List<Tarea> todasLasTareas = tareaRepo.findByActivoTrue();
+        Map<Integer, List<Tarea>> tareasPorPracticante = todasLasTareas.stream()
+                .collect(Collectors.groupingBy(t -> t.getPracticante().getIdPracticante()));
+
+        List<Tarea> tareasSemana = tareaRepo.findByFechaEntregaBetweenAndActivoTrue(inicioSemana, finSemana);
+        Map<Integer, List<Tarea>> tareasSemanaPorPracticante = tareasSemana.stream()
+                .collect(Collectors.groupingBy(t -> t.getPracticante().getIdPracticante()));
+
         List<AprendizDTO> listaAprendices = new ArrayList<>();
 
-        for (Practicante p : practicantes) {
-            if (p.getActivo()) {
-                AprendizDTO dto = new AprendizDTO();
-                dto.setNombreCompleto(p.getNombre() + " " + p.getApellidos());
-                dto.setCargo(p.getCargo());
-                dto.setArea(p.getArea());
-                
-                String pri = p.getPrioridad().getNivel();
-                dto.setPrioridad(pri.substring(0, 1).toUpperCase() + pri.substring(1).toLowerCase());
+        for (Practicante p : practicantesActivos) {
+            AprendizDTO dto = new AprendizDTO();
+            dto.setNombreCompleto(p.getNombre() + " " + p.getApellidos());
+            dto.setCargo(p.getCargo());
+            dto.setArea(p.getArea());
 
-                List<Tarea> tareasGenerales = tareaRepo.findByPracticante_IdPracticanteAndActivoTrue(p.getIdPracticante());
-                dto.setAvanceGeneral(calcularPorcentaje(tareasGenerales));
+            String pri = p.getPrioridad().getNivel();
+            dto.setPrioridad(pri.substring(0, 1).toUpperCase() + pri.substring(1).toLowerCase());
 
-                List<Tarea> tareasSemana = tareaRepo.findByPracticante_IdPracticanteAndFechaEntregaBetweenAndActivoTrue(p.getIdPracticante(), inicioSemana, finSemana);
-                dto.setAvanceSemanal(calcularPorcentaje(tareasSemana));
+            List<Tarea> tGenerales = tareasPorPracticante.getOrDefault(p.getIdPracticante(), new ArrayList<>());
+            dto.setAvanceGeneral(calcularPorcentaje(tGenerales));
 
-                listaAprendices.add(dto);
-            }
+            List<Tarea> tSemana = tareasSemanaPorPracticante.getOrDefault(p.getIdPracticante(), new ArrayList<>());
+            dto.setAvanceSemanal(calcularPorcentaje(tSemana));
+
+            listaAprendices.add(dto);
         }
         response.setListaAprendices(listaAprendices);
 
         // LÓGICA DE BARRAS DE PROGRESO
         PorcentajesDTO barras = new PorcentajesDTO();
-        
+
         int totSem = avance.getSemana().getTareasTotales();
-        barras.setAvanceSemanal(totSem == 0 ? 0 : (int) Math.round((avance.getSemana().getTareasCompletadas() * 100.0) / totSem));
-        barras.setIncumplimientoSemanal(totSem == 0 ? 0 : (int) Math.round((avance.getSemana().getTareasIncompletas() * 100.0) / totSem));
+        barras.setAvanceSemanal(
+                totSem == 0 ? 0 : (int) Math.round((avance.getSemana().getTareasCompletadas() * 100.0) / totSem));
+        barras.setIncumplimientoSemanal(
+                totSem == 0 ? 0 : (int) Math.round((avance.getSemana().getTareasIncompletas() * 100.0) / totSem));
 
         int totMes = avance.getMes().getTareasTotales();
-        barras.setAvanceMensual(totMes == 0 ? 0 : (int) Math.round((avance.getMes().getTareasCompletadas() * 100.0) / totMes));
-        barras.setIncumplimientoMensual(totMes == 0 ? 0 : (int) Math.round((avance.getMes().getTareasIncompletas() * 100.0) / totMes));
+        barras.setAvanceMensual(
+                totMes == 0 ? 0 : (int) Math.round((avance.getMes().getTareasCompletadas() * 100.0) / totMes));
+        barras.setIncumplimientoMensual(
+                totMes == 0 ? 0 : (int) Math.round((avance.getMes().getTareasIncompletas() * 100.0) / totMes));
 
         response.setBarrasProgreso(barras);
 
@@ -92,17 +105,26 @@ public class DashboardService {
     }
 
     private PeriodoDTO calcularAvance(LocalDate inicio, LocalDate fin) {
-        List<Tarea> tareasDelPeriodo = tareaRepo.findByFechaEntregaBetweenAndActivoTrue(inicio, fin);
+        List<Object[]> resultados = tareaRepo.countTareasPorEstadoEnPeriodo(inicio, fin);
         int completadas = 0, pendientes = 0, incompletas = 0;
+        int totalTareas = 0;
 
-        for (Tarea t : tareasDelPeriodo) {
-            if (t.getEstadoTarea().getIdEstadoTarea() == 1) completadas++;
-            else if (t.getEstadoTarea().getIdEstadoTarea() == 2) pendientes++;
-            else if (t.getEstadoTarea().getIdEstadoTarea() == 3) incompletas++;
+        for (Object[] fila : resultados) {
+            Integer idEstado = (Integer) fila[0];
+            Long count = (Long) fila[1];
+
+            if (idEstado == 1)
+                completadas = count.intValue();
+            else if (idEstado == 2)
+                pendientes = count.intValue();
+            else if (idEstado == 3)
+                incompletas = count.intValue();
+
+            totalTareas += count.intValue();
         }
 
         PeriodoDTO periodo = new PeriodoDTO();
-        periodo.setTareasTotales(tareasDelPeriodo.size());
+        periodo.setTareasTotales(totalTareas);
         periodo.setTareasCompletadas(completadas);
         periodo.setTareasPendientes(pendientes);
         periodo.setTareasIncompletas(incompletas);
@@ -117,7 +139,8 @@ public class DashboardService {
     }
 
     private int calcularPorcentaje(List<Tarea> tareas) {
-        if (tareas.isEmpty()) return 0;
+        if (tareas.isEmpty())
+            return 0;
         long completadas = tareas.stream().filter(t -> t.getEstadoTarea().getIdEstadoTarea() == 1).count();
         return (int) Math.round((completadas * 100.0) / tareas.size());
     }
