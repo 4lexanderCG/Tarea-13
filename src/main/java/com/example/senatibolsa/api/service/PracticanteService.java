@@ -4,10 +4,12 @@ import java.util.List;
 import java.util.Optional;
 
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.stereotype.Service;
 
 import com.example.senatibolsa.api.model.Practicante;
 import com.example.senatibolsa.api.repository.PracticanteRepository;
 
+@Service
 public class PracticanteService {
     @Autowired
     private PracticanteRepository practicanteRepository;
